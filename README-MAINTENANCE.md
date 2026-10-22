@@ -110,6 +110,32 @@ node scripts\probe-ai-base.mjs      # desktop 侧 aiBase 解析
 node scripts\verify-local.mjs       # 本维护版的回归检查（{{cwd}} 归零 / patch 层干净 / 沙箱可加载）
 ```
 
+## 开 / 关它 —— 三件事别混
+
+DSH 没有插件级的**运行时**开关。插件 README 也写着「宿主的设置页里没有这个条目」；
+插件自己只暴露 `/dsh-purge/status|override|uninstall|rules|skills|rewind|continue|update` 这些接口，
+没有 enable / disable。所以：
+
+| 你想干什么 | 怎么做 | 要重启 DSH 吗 |
+| --- | --- | --- |
+| **真的不加载它**（最彻底，零开销） | 双击桌面「03-开关dsh-purge（开-关）」，或 `scripts\toggle-purge.cmd`（切 `dsh.profile.bundles` 成员） | 要（装配在启动时解析） |
+| 只关掉提示词注入、插件还在跑 | 把 `cordis.patch.yml` 里该 entry 的 `config.enabled` 改成 `false`（**没有 GUI 入口**，只能改文件） | 要 |
+| 撤销插件对 DSH 安装目录做的清洗（改写 `dsh.cmd`、注入 `lib/bin.js` 等） | 会话标题旁 dsh-purge → 清洗页「卸载」，或命令行 `dsh-purge --revert` | 视提示 |
+
+`toggle-purge.cmd` 支持 `-Set on|off|toggle`（默认 toggle）和 `-Profile desktop|web`；
+同样有进程守卫、备份到 `$DSH_HOME\_backups\toggle-purge-<profile>-<时间戳>\`、写完回读校验。
+
+## web profile 的处理（2026-10-22）
+
+`web` profile 原本 `bundles` 里还带着 `dsh-purge`、依赖指向已删的 `master.tar.gz`、
+`node_modules` 里是含 `{{cwd}}` 的原版 —— 只要在 web 端开一轮会话就会炸。现已：
+
+- `dependencies."dsh-purge"` → `file:E:/YX/AI/XM/dsh-purge`（可解析，不再 404）
+- `dsh.profile.bundles` **移除** `dsh-purge`（不加载，web 端不受影响）
+- 备份在 `$DSH_HOME\_backups\purge-web-fix-<时间戳>\`
+
+以后要在 web 端也用它：`scripts\toggle-purge.cmd -Profile web -Set on`，再跑一次 pnpm install 同步 `node_modules`。
+
 ## 已知遗留
 
 - `dsh-purge-redteam-ui` 需要 `webServer` 服务；headless 启动时只会 `pending`，属于预期（桌面/Web 宿主下正常）。
