@@ -1,7 +1,7 @@
 > **这是本地维护版（1.1.71-local.1），不是上游原版。**
 > 上游 `YuJunZhiXue/dsh-purge` 已于 2026-10-22 起 404。本版在 v1.1.71 基础上补了 DSH 0.2.1-rc.2 的
 > `{{cwd}}` 兼容修复与 patch 层噪音清理，改动逐条列在 [README-MAINTENANCE.md](README-MAINTENANCE.md)。
-> 原样快照见同账号的 `dsh-purge-original` 仓库。
+> 原样快照见本仓库 `upstream/1.1.71` 分支。
 
 ---
 <p align="center">
