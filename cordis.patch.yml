@@ -1,0 +1,84 @@
+# dsh-purge bundle patch
+#
+# 清洗 + 演练台都在本插件内（lib/redteam、presets/redteam、skills/redteam）。
+# 只装 dsh-purge，不外接、不 link 其它红队包。
+
+# 关掉旧的独立红队包行（若用户以前装过 dsh-redteam-mode）
+#
+# 2026-10-22 本地维护：本机 desktop / web 两个 profile 的 node_modules 里都没有
+# dsh-redteam-* 这些旧独立包，patch 层按 id 找不到目标 entry，启动时会逐条打印
+# `patch: entry "redteam-xxx" not found`。为了让开插件时的终端干净，这里整段注释掉。
+# 以后若真装了旧独立红队包，把下面 5 段 `- id: ...` 原样恢复即可。
+#
+# - id: redteam-store
+#   name: dsh-redteam-store
+#   disabled: true
+#
+# - id: redteam-ui
+#   name: dsh-redteam-ui
+#   disabled: true
+#
+# - id: redteam-mode
+#   name: dsh-redteam-mode
+#   disabled: true
+#
+# - id: redteam-mode-store
+#   name: dsh-redteam-mode/store
+#   disabled: true
+#
+# - id: redteam-mode-ui
+#   name: dsh-redteam-mode/ui
+#   disabled: true
+
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    personaPrefix: ""
+    # 2026-10-18：0.2.1-rc.2 的 system-prompt 不再注册 {{cwd}} 提示词变量
+    # （注册表只剩 provider/model），personaSuffix 里写 {{cwd}} 会在每次组装时抛
+    # "unknown prompt variable" 导致整轮对话失败。当前工作目录改由工作目录服务
+    # 以必需 runtime 上下文提供，后缀留空（省略即遮蔽官方后缀）。
+    personaSuffix: ""
+
+# 2026-10-22 本地维护：这里原本还有一行顶层 patch
+#   - id: dsh-purge
+#     inject: [systemPrompt, tools]
+# 但 dsh-purge 本身要到下面 insert 段才被创建，patch 层按 id 找不到目标 entry，
+# 启动时就会打印 `patch: entry "dsh-purge" not found`。inject 已经在 insert 里声明，
+# 这行是冗余引用，删掉后启动不再报该警告。
+
+- insert:
+    - id: dsh-purge
+      name: 'dsh-purge'
+      inject: [systemPrompt, tools]
+      config:
+        enabled: true
+        autoApplyOnStart: false
+        autoUpdateOnStart: false
+        autoRevertOnMissing: false
+        injectOnce: false
+        stripMnemon: true
+        verbose: false
+        postPrompt: ""
+        postPromptOrder: 5100
+        autoRetry: true
+        retryMax: 3
+        autoContinue: false
+        continueMax: 3
+        continueText: "继续"
+        capabilityProtocol: true
+        hooksDenyBypass: true
+
+    # 演练台：预设 + 技能落地（本插件 lib/redteam）
+    - id: dsh-purge-redteam
+      name: dsh-purge/redteam
+
+    # 演练台事实库（SQLite），数据在 $DSH_HOME/redteam
+    - id: dsh-purge-redteam-store
+      name: dsh-purge/redteam/store
+      config:
+        root: !!js dshHomePath('redteam')
+
+    # 演练台 HTTP 桥 POST /redteam/api
+    - id: dsh-purge-redteam-ui
+      name: dsh-purge/redteam/ui
