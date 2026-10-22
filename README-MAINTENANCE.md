@@ -37,7 +37,34 @@
 
 ## 接入（把某个 profile 指向本目录）
 
-前提：**完全退出 DSH**（宿主运行期间 CLI 拿不到 `package.json.lock`）。
+前提：**完全退出 DSH**（宿主运行期间 `package.json.lock` 被宿主占用，pnpm 写不进去）。
+关窗口不算退出，要确认任务管理器里没有 `DeepSeek Harness` 进程——脚本自己也会检查，检测到就退出。
+
+### 方式 A：用脚本（推荐）
+
+```cmd
+:: 1) 预演，只打印将要改什么，不落盘
+E:\YX\AI\XM\dsh-purge\scripts\link-to-profile.cmd
+
+:: 2) 确认无误后执行（备份 → 改依赖/bundles/patch → pnpm install → 回读校验）
+E:\YX\AI\XM\dsh-purge\scripts\link-to-profile.cmd -Apply
+
+:: 3) 如果 pnpm 因联网或锁文件失败，用零联网的方式：
+E:\YX\AI\XM\dsh-purge\scripts\link-to-profile.cmd -Apply -NoInstall
+```
+
+脚本做四件事：改 `dependencies."dsh-purge"` → `file:E:/YX/AI/XM/dsh-purge`、`bundles` 补回 `"dsh-purge"`、
+删掉 `cordis.patch.yml` 里那 4 行 `disabled: true`、然后安装。改动前把
+`package.json` / `pnpm-lock.yaml` / `cordis.patch.yml` 备份到 `$DSH_HOME\_backups\purge-local-<时间戳>\`。
+
+写文件全部走「文本级最小编辑 + 无 BOM」，不用 `ConvertTo-Json` 往返：BOM 会让 DSH 的 `readProfileManifest` 抛
+`Unexpected token`，历史上已经踩过一次 crash。
+
+- 默认安装方式 `pnpm install`：`pnpm-lock.yaml` 与声明一致，最规范。
+- `-NoInstall`：跳过 pnpm，把 `node_modules\dsh-purge` 换成指向本目录的 junction，零联网、改代码即时生效；
+  代价是 lockfile 暂时不一致，下次 `pnpm install` 会把它换回包副本。
+
+### 方式 B：手工
 
 ```powershell
 # 1) 备份
@@ -46,20 +73,23 @@ $bak = "E:\DevTools\dsh-home\_backups\purge-local-$(Get-Date -Format yyyyMMdd-HH
 New-Item -ItemType Directory -Force -Path $bak | Out-Null
 Copy-Item "$p\package.json","$p\pnpm-lock.yaml","$p\cordis.patch.yml" $bak
 
-# 2) 依赖改成 file:
-#    package.json -> dependencies."dsh-purge" = "file:E:/YX/AI/XM/dsh-purge"
-
-# 3) 恢复加载：bundles 里加回 "dsh-purge"（或直接用市场开关），
-#    并删掉 cordis.patch.yml 末尾 4 行 dsh-purge 相关的 `disabled: true`
-
-# 4) 安装 + 启动
+# 2) package.json：dependencies."dsh-purge" 改成 "file:E:/YX/AI/XM/dsh-purge"
+# 3) package.json：dsh.profile.bundles 里加一行 "dsh-purge"
+# 4) cordis.patch.yml：删掉末尾 dsh-purge / dsh-purge-redteam* 的 4 组 disabled: true
+# 5) 安装（二选一）
 $env:ELECTRON_RUN_AS_NODE = 1
 & 'D:\Program Files\DeepSeek Harness\DeepSeek Harness.exe' --expose-internals `
   'D:\Program Files\DeepSeek Harness\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.cjs' `
   install --reporter=append-only
+# 或者不联网：mklink /J "$p\node_modules\dsh-purge" "E:\YX\AI\XM\dsh-purge"
 ```
 
-更省事的方式：退出 DSH 后双击本目录的 `scripts\link-to-profile.cmd`（带备份与回滚提示）。
+### 启动后怎么算成功
+
+1. 启动终端里**不再出现** `patch: entry "dsh-purge" not found`（6 条警告应归零）。
+2. 侧栏出现「清洗」「演练台」两页。
+3. 新开一个会话再发消息（注入只在会话启动时写入，当前会话不会变）。
+4. `$DSH_HOME\profiles\desktop\node_modules\dsh-purge\package.json` 的 `version` = `1.1.71-local.1`。
 
 ## 回滚
 

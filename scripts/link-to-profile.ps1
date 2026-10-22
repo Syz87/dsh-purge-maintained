@@ -12,17 +12,24 @@
 
   要求：DeepSeek Harness 必须完全退出（宿主运行期间 pnpm 拿不到 package.json.lock）。
 
+  安装方式二选一：
+    - 默认：跑 pnpm install（lockfile 与声明一致，最规范；失败时可用 -NoInstall 兜底）
+    - -NoInstall：跳过 pnpm，直接把 node_modules\dsh-purge 换成指向维护目录的 junction
+      （零联网、立即生效；代价是 pnpm-lock.yaml 暂时不一致，下次 pnpm install 会覆盖）
+
 .EXAMPLE
-  .\link-to-profile.ps1                 # 预演，只打印将要做的改动
-  .\link-to-profile.ps1 -Apply          # 真正落盘并跑 pnpm install
-  .\link-to-profile.ps1 -Profile web -Apply
+  .\link-to-profile.ps1                          # 预演，只打印将要做的改动
+  .\link-to-profile.ps1 -Apply                   # 落盘并跑 pnpm install
+  .\link-to-profile.ps1 -Apply -NoInstall        # 落盘 + junction 直连（不联网）
+  .\link-to-profile.ps1 -Profile web -Apply      # 处理 web profile
 #>
 [CmdletBinding()]
 param(
   [ValidateSet('desktop', 'web')]
   [string]$Profile = 'desktop',
   [string]$PluginDir = 'E:\YX\AI\XM\dsh-purge',
-  [switch]$Apply
+  [switch]$Apply,
+  [switch]$NoInstall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,46 +97,119 @@ foreach ($f in @($pkgPath, $patchPath)) {
 if (Test-Path $lockPath) { Copy-Item $lockPath (Join-Path $bak 'pnpm-lock.yaml') -Force }
 Write-Info "已备份到 $bak"
 
-# ---------- 4. 改 package.json ----------
+# ---------- 4. 改 package.json（文本级最小编辑，不做 JSON 往返）----------
 Write-Step '改写 package.json'
-$pkg.dependencies | Add-Member -NotePropertyName 'dsh-purge' -NotePropertyValue $newDep -Force
-if (-not $hasBundle) {
-  if (-not $pkg.dsh) { $pkg | Add-Member -NotePropertyName dsh -NotePropertyValue ([pscustomobject]@{}) -Force }
-  if (-not $pkg.dsh.profile) { $pkg.dsh | Add-Member -NotePropertyName profile -NotePropertyValue ([pscustomobject]@{}) -Force }
-  $pkg.dsh.profile | Add-Member -NotePropertyName bundles -NotePropertyValue (@($bundles) + 'dsh-purge') -Force
-  Write-Info 'bundles 已补回 dsh-purge'
+$noBom = New-Object System.Text.UTF8Encoding($false)
+$pkgNew = $pkgRaw
+
+# 4a. 依赖行：只替换 dsh-purge 的值，其他行不碰
+$depPattern = '(?m)^(\s*)"dsh-purge"\s*:\s*"[^"]*"\s*,'
+if ([regex]::IsMatch($pkgNew, $depPattern)) {
+  $repl = '$1"dsh-purge": "' + $newDep + '",'
+  $pkgNew = [regex]::Replace($pkgNew, $depPattern, $repl)
+  Write-Info "依赖行已替换为 $newDep"
+} else {
+  Write-Warn2 '在 dependencies 里没找到 dsh-purge 行，请手工改成 file:E:/YX/AI/XM/dsh-purge'
 }
-$pkgJson = $pkg | ConvertTo-Json -Depth 20
-Set-Content -Path $pkgPath -Value $pkgJson -Encoding UTF8
-Write-Info "已写入 $pkgPath"
+
+# 4b. bundles：在数组最后一项后面补一行
+if (-not $hasBundle) {
+  $lines = $pkgNew -split "`n"
+  $inBundles = $false
+  $lastIdx = -1
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '"bundles"\s*:\s*\[') { $inBundles = $true; continue }
+    if ($inBundles) {
+      if ($lines[$i] -match '^\s*\]') { break }
+      if ($lines[$i] -match '^\s*"') { $lastIdx = $i }
+    }
+  }
+  if ($lastIdx -ge 0) {
+    $indent = ([regex]::Match($lines[$lastIdx], '^(\s*)')).Groups[1].Value
+    $cr = if ($lines[$lastIdx].EndsWith("`r")) { "`r" } else { "" }
+    if (-not $lines[$lastIdx].TrimEnd().EndsWith(',')) {
+      $lines[$lastIdx] = $lines[$lastIdx].TrimEnd() + ',' + $cr
+    }
+    $insert = $indent + '"dsh-purge"' + $cr
+    if ($lastIdx -eq $lines.Count - 1) {
+      $lines = @($lines[0..$lastIdx]) + @($insert)
+    } else {
+      $lines = @($lines[0..$lastIdx]) + @($insert) + @($lines[($lastIdx + 1)..($lines.Count - 1)])
+    }
+    $pkgNew = $lines -join "`n"
+    Write-Info 'bundles 已补回 dsh-purge'
+  } else {
+    Write-Warn2 '没定位到 bundles 数组末项，请手工在 bundles 里加 "dsh-purge"'
+  }
+}
+
+[System.IO.File]::WriteAllText($pkgPath, $pkgNew, $noBom)
+
+# 4c. BOM 检查：DSH 的 JSON.parse 不容忍 BOM（历史上有过 crash 记录）
+$bytes = [System.IO.File]::ReadAllBytes($pkgPath)
+if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+  Write-Warn2 'package.json 带 BOM，正在按无 BOM 重写（否则 DSH 启动报 Unexpected token）'
+  [System.IO.File]::WriteAllText($pkgPath, $pkgNew, $noBom)
+}
+try {
+  $null = [System.IO.File]::ReadAllText($pkgPath) | ConvertFrom-Json
+  Write-Info 'package.json JSON 语法校验通过'
+} catch {
+  Write-Warn2 "package.json 语法校验失败：$($_.Exception.Message)（备份在 $bak，可回滚）"
+  exit 3
+}
 
 # ---------- 5. 改 cordis.patch.yml ----------
 Write-Step '改写 cordis.patch.yml'
 $newPatch = [regex]::Replace($patchRaw, '(?m)^-\s*id:\s*dsh-purge(?:-redteam(?:-store|-ui)?)?\s*\r?\n\s*disabled:\s*true\s*\r?\n', '')
 if ($newPatch -ne $patchRaw) {
-  Set-Content -Path $patchPath -Value $newPatch -Encoding UTF8
+  [System.IO.File]::WriteAllText($patchPath, $newPatch, $noBom)
   Write-Info '已移除 dsh-purge 的 disabled 行'
 } else {
   Write-Info '没有需要移除的 disabled 行'
 }
 
-# ---------- 6. pnpm install ----------
-Write-Step 'pnpm install'
+# ---------- 6. 安装 ----------
 $exe = 'D:\Program Files\DeepSeek Harness\DeepSeek Harness.exe'
 $pnpm = 'D:\Program Files\DeepSeek Harness\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.cjs'
-if (-not (Test-Path $exe)) { throw "找不到宿主可执行文件：$exe" }
-if (-not (Test-Path $pnpm)) { throw "找不到 pnpm：$pnpm" }
-$env:ELECTRON_RUN_AS_NODE = '1'
-Push-Location $profileDir
-try {
-  & $exe --expose-internals $pnpm install --reporter=append-only
-  $code = $LASTEXITCODE
-} finally {
-  Pop-Location
-}
-if ($code -ne 0) {
-  Write-Warn2 "pnpm install 退出码 $code；备份在 $bak，可用它回滚。"
-  exit $code
+$target = Join-Path $profileDir 'node_modules\dsh-purge'
+
+if ($NoInstall) {
+  Write-Step '跳过 pnpm：改用 junction 直连维护目录'
+  if (Test-Path $target) {
+    $item = Get-Item $target -Force
+    if ($item.LinkType) {
+      cmd /c rmdir "$target" | Out-Null
+      Write-Info "已移除旧的链接（$($item.LinkType)）"
+    } else {
+      Remove-Item $target -Recurse -Force
+      Write-Info '已删除旧的实体目录'
+    }
+  }
+  cmd /c mklink /J "$target" "$PluginDir" | Out-Null
+  if (Test-Path (Join-Path $target 'package.json')) {
+    Write-Info "junction 已建立：$target -> $PluginDir（改维护目录即时生效，无需重装）"
+  } else {
+    Write-Warn2 'junction 建立失败，请手工执行：mklink /J "<profile>\node_modules\dsh-purge" "E:\YX\AI\XM\dsh-purge"'
+  }
+  Write-Warn2 '注意：pnpm-lock.yaml 未更新，下次 pnpm install 会把 junction 换回包副本'
+} else {
+  Write-Step 'pnpm install'
+  if (-not (Test-Path $exe)) { Write-Warn2 "找不到宿主可执行文件：$exe"; exit 4 }
+  if (-not (Test-Path $pnpm)) { Write-Warn2 "找不到 pnpm：$pnpm"; exit 4 }
+  $env:ELECTRON_RUN_AS_NODE = '1'
+  Push-Location $profileDir
+  try {
+    & $exe --expose-internals $pnpm install --reporter=append-only
+    $code = $LASTEXITCODE
+  } finally {
+    Pop-Location
+  }
+  if ($code -ne 0) {
+    Write-Warn2 "pnpm install 退出码 $code；备份在 $bak，可用它回滚。"
+    Write-Warn2 '若失败原因是联网/锁文件，可改用：link-to-profile.cmd -Apply -NoInstall（junction 直连，零联网）'
+    exit $code
+  }
 }
 
 # ---------- 7. 回读校验 ----------
