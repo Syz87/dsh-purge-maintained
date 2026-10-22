@@ -204,13 +204,12 @@ if ($NoInstall) {
   if (-not (Test-Path $exe)) { Write-Warn2 "找不到宿主可执行文件：$exe"; exit 4 }
   if (-not (Test-Path $pnpm)) { Write-Warn2 "找不到 pnpm：$pnpm"; exit 4 }
   $env:ELECTRON_RUN_AS_NODE = '1'
-  Push-Location $profileDir
-  try {
-    & $exe --expose-internals $pnpm install --reporter=append-only
-    $code = $LASTEXITCODE
-  } finally {
-    Pop-Location
-  }
+  # 必须 Start-Process -Wait：直接 & 调用时 Electron 主进程会先返回，pnpm 子进程晚几秒才真正写完
+  # node_modules，后面的回读就会读到旧版本（2026-10-22 实际踩到：误报「版本 1.1.71，应为 1.1.71-local.1」）
+  $proc = Start-Process -FilePath $exe `
+    -ArgumentList @('--expose-internals', "`"$pnpm`"", 'install', '--reporter=append-only') `
+    -WorkingDirectory $profileDir -NoNewWindow -Wait -PassThru
+  $code = $proc.ExitCode
   if ($code -ne 0) {
     Write-Warn2 "pnpm install 退出码 $code；备份在 $bak，可用它回滚。"
     Write-Warn2 '若失败原因是联网/锁文件，可改用：link-to-profile.cmd -Apply -NoInstall（junction 直连，零联网）'
@@ -218,7 +217,7 @@ if ($NoInstall) {
   }
 }
 
-# ---------- 7. 回读校验 ----------
+# ---------- 7. 回读校验（轮询等待安装落盘）----------
 Write-Step '回读校验'
 $pkg2 = Get-Content $pkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $dep2 = $pkg2.dependencies.'dsh-purge'
@@ -228,13 +227,26 @@ $left = [regex]::Matches($patch2, '(?m)^-\s*id:\s*dsh-purge').Count
 Write-Info "依赖 = $dep2"
 Write-Info "bundles 含 dsh-purge = $b2"
 Write-Info "patch 里剩余 dsh-purge 顶层行 = $left（应为 0）"
+
+$expect = (Get-Content (Join-Path $PluginDir 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
 $nm = Join-Path $profileDir 'node_modules\dsh-purge\package.json'
-if (Test-Path $nm) {
-  $v = (Get-Content $nm -Raw -Encoding UTF8 | ConvertFrom-Json).version
-  Write-Info "node_modules\dsh-purge 版本 = $v（应为 1.1.71-local.1）"
-  if ($v -ne '1.1.71-local.1') { Write-Warn2 '版本不对，可能是 pnpm 复用了旧缓存，试试 install --force' }
-} else {
+$v = ''
+$deadline = (Get-Date).AddSeconds(90)
+$waited = 0
+do {
+  if (Test-Path $nm) { $v = (Get-Content $nm -Raw -Encoding UTF8 | ConvertFrom-Json).version }
+  if ($v -eq $expect) { break }
+  Start-Sleep -Milliseconds 1500
+  $waited++
+} while ((Get-Date) -lt $deadline)
+
+if (-not (Test-Path $nm)) {
   Write-Warn2 'node_modules\dsh-purge 不存在，安装可能未完成'
+} elseif ($v -eq $expect) {
+  Write-Info "node_modules\dsh-purge 版本 = $v（与源一致，等了 ${waited} 轮）"
+} else {
+  Write-Warn2 "等了 $($waited * 1.5) 秒，node_modules\dsh-purge 版本仍是 $v（源是 $expect）"
+  Write-Warn2 '可能是 pnpm 复用了旧缓存，试试 install --force；或改用 -NoInstall（junction 直连）'
 }
 
 Write-Step '完成'
