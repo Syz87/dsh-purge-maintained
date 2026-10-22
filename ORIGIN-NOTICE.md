@@ -46,7 +46,7 @@ export const CWD_ONLY_SUFFIX = "Your working directory is {{cwd}}.";
 带 `{{cwd}}` 的注入文本会在每次组装时抛 `unknown prompt variable "{{cwd}}"`，
 表现为**开启插件后整轮对话直接失败**。`cordis.patch.yml` 的 `personaSuffix` 同样带 `{{cwd}}`。
 
-要可用的版本，请用同作者的维护版（见 `dsh-purge` 仓库的 `README-MAINTENANCE.md`），
+要可用的版本，请切到本仓库 `main` 分支（维护版，见 `README-MAINTENANCE.md`），
 本目录只用于「原件是什么样」的取证与 diff。
 
 ## 许可与署名

@@ -1,6 +1,6 @@
 > **原样快照（v1.1.71，未做任何修改）——请先读 [ORIGIN-NOTICE.md](ORIGIN-NOTICE.md)。**
 > 上游 `YuJunZhiXue/dsh-purge` 已 404。这份代码里的 `{{cwd}}` 会让 DSH 0.2.1-rc.2 的会话直接失败，
-> 仅作归档与 diff 用，**不要直接安装**。可用的版本见同账号的 `dsh-purge-maintained` 仓库。
+> 仅作归档与 diff 用，**不要直接安装**。可用的版本见本仓库 `main` 分支。
 
 ---
 <p align="center">
