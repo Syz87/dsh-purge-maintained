@@ -1,10 +1,10 @@
 @echo off
-rem 把指定 profile 的 dsh-purge 依赖指向本地维护副本。
-rem 双击 = 预演（不落盘）；要真正执行，命令行加 -Apply：
-rem     link-to-profile.cmd -Apply
-rem     link-to-profile.cmd -Profile web -Apply
+rem Preview only: prints what would change, writes nothing.
+rem (Pure ASCII on purpose -- cmd.exe reads .cmd in the OEM codepage,
+rem  so any UTF-8 Chinese in here would garble the following lines.)
 setlocal
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0link-to-profile.ps1" %*
 echo.
-pause
+echo [preview] Nothing was written. Press any key to close.
+pause >nul

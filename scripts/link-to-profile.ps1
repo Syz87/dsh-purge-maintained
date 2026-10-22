@@ -34,6 +34,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# 控制台按 UTF-8 输出：否则在 GBK(936) 代码页下中文会显示成乱码
+try {
+  chcp 65001 > $null
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+
 function Write-Step($msg) { Write-Host "`n== $msg" -ForegroundColor Cyan }
 function Write-Info($msg) { Write-Host "   $msg" }
 function Write-Warn2($msg) { Write-Host "   ! $msg" -ForegroundColor Yellow }
