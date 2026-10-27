@@ -37,6 +37,7 @@
   "scripts": {
     "embed-prompt": "node scripts/embed-default-prompt.mjs",
     "build:client": "node scripts/build-client.mjs",
+    "install:skill": "node scripts/install-paper-autopilot.mjs",
     "postinstall": "node scripts/ensure-profile-bundle.mjs"
   },
   "license": "Apache-2.0",

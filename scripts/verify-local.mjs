@@ -87,6 +87,14 @@ const skillsDir = path.join(root, "skills", "redteam");
 const skillFiles = fs.existsSync(skillsDir) ? fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md")) : [];
 ok(skillFiles.length >= 20, `skills/redteam 技能数 >= 20（实际 ${skillFiles.length}）`);
 ok(skillFiles.includes("redteam-setup.md"), "核心技能 redteam-setup.md 在位");
+// 2026-10-27：从社区 fork（7900mpsOVO/dsh-purge1.1.73）找回上游下架的两个技能
+ok(skillFiles.includes("evidence-discipline.md"), "evidence-discipline.md 在位（配套 1.1.79 证据账本与 redteam_evidence 工具）");
+const paDir = path.join(root, "skills", "paper-autopilot");
+const paFiles = fs.existsSync(paDir) ? (function walk(d) {
+  return fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(d, e.name)) : [e.name]);
+})(paDir) : [];
+ok(fs.existsSync(path.join(paDir, "SKILL.md")) && paFiles.length >= 60, `skills/paper-autopilot 在位（${paFiles.length} 个文件）`);
+ok(fs.existsSync(path.join(root, "scripts", "install-paper-autopilot.mjs")), "install:skill 安装脚本在位");
 
 // 6. 入口文件齐全
 console.log("\n6) 入口文件");
